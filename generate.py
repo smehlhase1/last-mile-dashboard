@@ -41,6 +41,9 @@ JIRA_TOKEN = os.environ.get("JIRA_API_TOKEN", "")
 DASHBOARD_FILE = os.path.join(os.path.dirname(__file__), "index.html")
 TEMPLATE_FILE  = os.path.join(os.path.dirname(__file__), "template.html")
 
+# Adoption is measured from this date forward — before this date FlowForge was not yet in use
+FF_ADOPTION_START = "2026-06-01"
+
 # ── Last Mile initiative registry ─────────────────────────────────────────────
 # (slug, prod_key, project_number, display_title, {epic_key: epic_title})
 # project_number groups initiatives into programme sections.
@@ -280,13 +283,17 @@ def compute_initiative_stats(all_tickets, ff_tickets):
     for slug, (prod_key, proj, title, epics) in INIT_META.items():
         total = len(init_all[slug])
         ff    = len(init_ff[slug])
-        pct   = round(ff / total * 100) if total > 0 else 0
+        # Adoption % computed only from FF_ADOPTION_START forward
+        total_since = sum(1 for t in init_all[slug] if t["created"] >= FF_ADOPTION_START)
+        ff_since    = sum(1 for t in init_ff[slug]  if t["created"] >= FF_ADOPTION_START)
+        pct_since   = round(ff_since / total_since * 100) if total_since > 0 else 0
         done_ff   = sum(1 for t in init_ff[slug] if t["cat"] == "Done")
         wip_ff    = sum(1 for t in init_ff[slug] if t["cat"] == "In Progress")
         todo_ff   = sum(1 for t in init_ff[slug] if t["cat"] == "To Do")
         stats[slug] = {
             "slug": slug, "prod_key": prod_key, "proj": proj, "title": title,
-            "total": total, "ff": ff, "non_ff": total - ff, "pct": pct,
+            "total": total, "ff": ff, "non_ff": total - ff,
+            "total_since": total_since, "ff_since": ff_since, "pct_since": pct_since,
             "done_ff": done_ff, "wip_ff": wip_ff, "todo_ff": todo_ff,
             "tickets": init_all[slug],
             "ff_tickets": init_ff[slug],
@@ -358,12 +365,10 @@ def adoption_bar(ff, total):
 
 
 def build_initiative_row(s):
-    pct   = s["pct"]
+    pct   = s["pct_since"]
     color = pct_color(pct)
-    ff    = s["ff"]
-    total = s["total"]
-    non_ff = s["non_ff"]
-    bar_w  = pct
+    ff    = s["ff_since"]
+    total = s["total_since"]
 
     done_html = f'<span class="badge badge-done">{s["done_ff"]} done</span>' if s["done_ff"] else ""
     wip_html  = f'<span class="badge badge-wip">{s["wip_ff"]} active</span>'  if s["wip_ff"]  else ""
@@ -373,7 +378,7 @@ def build_initiative_row(s):
         f'<tr class="init-row">'
         f'<td class="init-name"><a href="{JIRA_URL}/browse/{s["prod_key"]}" target="_blank" class="init-link">{html_lib.escape(s["title"])}</a></td>'
         f'<td class="adopt-cell">'
-        f'  <div class="adopt-bar-wrap"><div class="adopt-bar" style="width:{bar_w}%;background:{color}"></div></div>'
+        f'  <div class="adopt-bar-wrap"><div class="adopt-bar" style="width:{pct}%;background:{color}"></div></div>'
         f'</td>'
         f'<td class="pct-cell" style="color:{color}">{pct}%</td>'
         f'<td class="count-cell">{ff} <span class="dim">/ {total}</span></td>'
@@ -383,10 +388,11 @@ def build_initiative_row(s):
 
 
 def build_project_section(proj, label, init_slugs, stats):
-    proj_total = sum(stats[s]["total"] for s in init_slugs if s in stats)
-    proj_ff    = sum(stats[s]["ff"]    for s in init_slugs if s in stats)
-    proj_pct   = round(proj_ff / proj_total * 100) if proj_total > 0 else 0
-    color      = pct_color(proj_pct)
+    proj_total_since = sum(stats[s]["total_since"] for s in init_slugs if s in stats)
+    proj_ff_since    = sum(stats[s]["ff_since"]    for s in init_slugs if s in stats)
+    proj_pct         = round(proj_ff_since / proj_total_since * 100) if proj_total_since > 0 else 0
+    proj_total_all   = sum(stats[s]["total"] for s in init_slugs if s in stats)
+    color            = pct_color(proj_pct)
 
     rows = "\n".join(build_initiative_row(stats[s]) for s in init_slugs if s in stats and stats[s]["total"] > 0)
 
@@ -399,7 +405,7 @@ def build_project_section(proj, label, init_slugs, stats):
         f'    <div class="proj-summary">'
         f'<div class="adopt-bar-wrap proj-bar"><div class="adopt-bar" style="width:{proj_pct}%;background:{color}"></div></div>'
         f'<span class="adopt-pct" style="color:{color}">{proj_pct}% adoption</span>'
-        f'<span class="proj-counts">{proj_ff} FlowForge / {proj_total} total tickets</span>'
+        f'<span class="proj-counts">{proj_ff_since} FF / {proj_total_since} tickets since Jun 2026</span>'
         f'</div>\n'
         f'  </div>\n'
         f'  <div class="proj-body">\n'
@@ -414,15 +420,17 @@ def build_project_section(proj, label, init_slugs, stats):
 
 
 def build_summary_cards(stats, all_months):
-    total_all = sum(s["total"] for s in stats.values())
-    total_ff  = sum(s["ff"]    for s in stats.values())
-    pct       = round(total_ff / total_all * 100) if total_all > 0 else 0
-    active    = sum(1 for s in stats.values() if s["total"] > 0)
-    color     = pct_color(pct)
+    total_all    = sum(s["total"]       for s in stats.values())
+    total_ff     = sum(s["ff"]          for s in stats.values())
+    total_since  = sum(s["total_since"] for s in stats.values())
+    ff_since     = sum(s["ff_since"]    for s in stats.values())
+    pct          = round(ff_since / total_since * 100) if total_since > 0 else 0
+    active       = sum(1 for s in stats.values() if s["total"] > 0)
+    color        = pct_color(pct)
     return (
         f'<div class="summary-card purple"><div class="num">{total_all}</div><div class="lbl">Total CIL Tickets</div></div>\n'
         f'<div class="summary-card green"><div class="num">{total_ff}</div><div class="lbl">FlowForge Tickets</div></div>\n'
-        f'<div class="summary-card amber"><div class="num" style="color:{color}">{pct}%</div><div class="lbl">Overall FF Adoption</div></div>\n'
+        f'<div class="summary-card amber"><div class="num" style="color:{color}">{pct}%</div><div class="lbl">FF Adoption (since Jun 2026)</div></div>\n'
         f'<div class="summary-card blue"><div class="num">{active}</div><div class="lbl">Active Initiatives</div></div>\n'
         f'<div class="summary-card gray"><div class="num">{len(all_months)}</div><div class="lbl">Months of Data</div></div>'
     )
