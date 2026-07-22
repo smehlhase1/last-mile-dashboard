@@ -116,6 +116,54 @@ canvas { width: 100% !important; height: 100% !important; }
 .badge-wip  { background: #1c1200; color: #fbbf24; border: 1px solid #d97706; }
 .badge-todo { background: #0c1a2e; color: #93c5fd; border: 1px solid #2563eb; }
 
+/* ── Initiative detail panel ─────────────────────────────────────────────── */
+.detail-row td { padding: 0; border-bottom: 1px solid #334155; }
+.detail-panel { display: none; background: #0f1117; padding: 16px 20px; }
+.init-row.open + .detail-row .detail-panel { display: block; }
+
+.expand-btn {
+  background: none; border: 1px solid #334155; border-radius: 4px;
+  color: #64748b; cursor: pointer; font-size: 10px; padding: 2px 7px;
+  line-height: 1.4;
+}
+.expand-btn:hover { border-color: #818cf8; color: #818cf8; }
+.init-row.open .expand-btn { border-color: #818cf8; color: #818cf8; }
+
+.epic-group { margin-bottom: 14px; }
+.epic-group:last-child { margin-bottom: 0; }
+.epic-head {
+  display: flex; align-items: center; gap: 8px;
+  padding: 5px 0; margin-bottom: 6px;
+  border-bottom: 1px solid #1e293b;
+}
+.epic-key-link { font-size: 11px; font-weight: 600; color: #818cf8; flex-shrink: 0; }
+.epic-title    { font-size: 12px; color: #94a3b8; }
+.epic-ff-badge { font-size: 10px; color: #4ade80; background: #052e16;
+                 border: 1px solid #16a34a; border-radius: 3px;
+                 padding: 1px 5px; margin-left: auto; flex-shrink: 0; }
+
+.ticket-list { display: flex; flex-direction: column; gap: 4px; padding-left: 8px; }
+.ticket-item {
+  display: flex; align-items: center; gap: 8px;
+  padding: 4px 6px; border-radius: 4px;
+}
+.ticket-item:hover { background: #1e293b; }
+.ticket-key { font-size: 11px; font-weight: 600; color: #818cf8; flex-shrink: 0; min-width: 72px; }
+.ticket-summary { font-size: 12px; color: #cbd5e1; flex: 1; min-width: 0;
+                  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ticket-status { font-size: 10px; flex-shrink: 0; }
+.ff-pill { font-size: 10px; background: #052e16; color: #4ade80;
+           border: 1px solid #16a34a; border-radius: 3px; padding: 1px 5px;
+           flex-shrink: 0; }
+.plain-pill { font-size: 10px; background: #1e293b; color: #64748b;
+              border: 1px solid #334155; border-radius: 3px; padding: 1px 5px;
+              flex-shrink: 0; }
+.t-badge { display: inline-block; font-size: 10px; font-weight: 600;
+           padding: 1px 5px; border-radius: 3px; }
+.t-done  { background: #052e16; color: #4ade80; border: 1px solid #16a34a; }
+.t-wip   { background: #1c1200; color: #fbbf24; border: 1px solid #d97706; }
+.t-todo  { background: #0c1a2e; color: #93c5fd; border: 1px solid #2563eb; }
+
 /* ── Footer ──────────────────────────────────────────────────────────────── */
 .footer { text-align: center; font-size: 11px; color: #475569;
           padding: 20px; border-top: 1px solid #1e293b; }
@@ -309,6 +357,11 @@ function drawChart() {
     const d = window.CHART_DATA[p];
     return `<div class="legend-item"><div class="legend-dot" style="background:${d.color}"></div>${d.label}</div>`;
   }).join('');
+}
+
+function toggleInit(btn) {
+  const row = btn.closest('tr');
+  row.classList.toggle('open');
 }
 
 // Open all sections by default

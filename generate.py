@@ -364,6 +364,79 @@ def adoption_bar(ff, total):
     )
 
 
+def _ticket_status_badge(cat, status):
+    if cat == "Done":
+        return f'<span class="t-badge t-done">Done</span>'
+    if cat == "In Progress":
+        return f'<span class="t-badge t-wip">{html_lib.escape(status)}</span>'
+    return f'<span class="t-badge t-todo">{html_lib.escape(status)}</span>'
+
+
+def build_detail_panel(s):
+    """Build the hidden expandable panel: epics → tickets."""
+    prod_key = s["prod_key"]
+    slug     = s["slug"]
+    _, proj, title, epics = INIT_META[slug]
+
+    # Group all tickets by their parent epic key
+    by_epic = defaultdict(list)
+    for t in s["tickets"]:
+        by_epic[t["parent"]].append(t)
+
+    parts = []
+    for epic_key, epic_title in epics.items():
+        tickets = by_epic.get(epic_key, [])
+        if not tickets:
+            continue
+        ff_count = sum(1 for t in tickets if t["is_flowforge"])
+        ff_badge = f'<span class="epic-ff-badge">{ff_count} FF</span>' if ff_count else ""
+        key_html = (
+            f'<a class="epic-key-link" href="{JIRA_URL}/browse/{epic_key}" target="_blank">{epic_key}</a>'
+            if epic_key else ""
+        )
+        rows = ""
+        for t in sorted(tickets, key=lambda x: x["key"]):
+            pill = '<span class="ff-pill">FlowForge</span>' if t["is_flowforge"] else '<span class="plain-pill">plain</span>'
+            stat = _ticket_status_badge(t["cat"], t["status"])
+            rows += (
+                f'<div class="ticket-item">'
+                f'<a class="ticket-key" href="{JIRA_URL}/browse/{t["key"]}" target="_blank">{t["key"]}</a>'
+                f'<span class="ticket-summary">{html_lib.escape(t["summary"])}</span>'
+                f'{pill}{stat}'
+                f'</div>\n'
+            )
+        parts.append(
+            f'<div class="epic-group">'
+            f'<div class="epic-head">{key_html}<span class="epic-title">{html_lib.escape(epic_title)}</span>{ff_badge}</div>'
+            f'<div class="ticket-list">{rows}</div>'
+            f'</div>'
+        )
+
+    # Tickets parented directly to the initiative prod_key (no sub-epic)
+    direct = [t for t in by_epic.get(prod_key, []) if prod_key not in epics]
+    if direct:
+        rows = ""
+        for t in sorted(direct, key=lambda x: x["key"]):
+            pill = '<span class="ff-pill">FlowForge</span>' if t["is_flowforge"] else '<span class="plain-pill">plain</span>'
+            stat = _ticket_status_badge(t["cat"], t["status"])
+            rows += (
+                f'<div class="ticket-item">'
+                f'<a class="ticket-key" href="{JIRA_URL}/browse/{t["key"]}" target="_blank">{t["key"]}</a>'
+                f'<span class="ticket-summary">{html_lib.escape(t["summary"])}</span>'
+                f'{pill}{stat}'
+                f'</div>\n'
+            )
+        parts.append(
+            f'<div class="epic-group">'
+            f'<div class="epic-head"><span class="epic-title">Direct tickets</span></div>'
+            f'<div class="ticket-list">{rows}</div>'
+            f'</div>'
+        )
+
+    inner = "\n".join(parts) if parts else '<span style="color:#475569;font-size:12px">No tickets found.</span>'
+    return f'<div class="detail-panel">{inner}</div>'
+
+
 def build_initiative_row(s):
     pct   = s["pct_since"]
     color = pct_color(pct)
@@ -374,9 +447,15 @@ def build_initiative_row(s):
     wip_html  = f'<span class="badge badge-wip">{s["wip_ff"]} active</span>'  if s["wip_ff"]  else ""
     todo_html = f'<span class="badge badge-todo">{s["todo_ff"]} to do</span>' if s["todo_ff"] else ""
 
+    detail = build_detail_panel(s)
+    colspan = 5
+
     return (
         f'<tr class="init-row">'
-        f'<td class="init-name"><a href="{JIRA_URL}/browse/{s["prod_key"]}" target="_blank" class="init-link">{html_lib.escape(s["title"])}</a></td>'
+        f'<td class="init-name">'
+        f'<button class="expand-btn" onclick="toggleInit(this)" title="Show epics &amp; tickets">▶</button> '
+        f'<a href="{JIRA_URL}/browse/{s["prod_key"]}" target="_blank" class="init-link">{html_lib.escape(s["title"])}</a>'
+        f'</td>'
         f'<td class="adopt-cell">'
         f'  <div class="adopt-bar-wrap"><div class="adopt-bar" style="width:{pct}%;background:{color}"></div></div>'
         f'</td>'
@@ -384,6 +463,7 @@ def build_initiative_row(s):
         f'<td class="count-cell">{ff} <span class="dim">/ {total}</span></td>'
         f'<td class="badge-cell">{wip_html}{done_html}{todo_html}</td>'
         f'</tr>'
+        f'<tr class="detail-row"><td colspan="{colspan}">{detail}</td></tr>'
     )
 
 
