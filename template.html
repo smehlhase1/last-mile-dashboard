@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Last Mile — FlowForge Adoption Dashboard</title>
+<style>
+/* ── Reset & base ────────────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+       background: #0f1117; color: #e2e8f0; font-size: 14px; line-height: 1.5; }
+a { color: #818cf8; text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+/* ── Page shell ──────────────────────────────────────────────────────────── */
+.page-header {
+  background: linear-gradient(135deg, #1e1b4b 0%, #1e293b 100%);
+  padding: 28px 32px 24px;
+  border-bottom: 1px solid #334155;
+}
+.page-header h1 { font-size: 22px; font-weight: 700; color: #fff;
+                  letter-spacing: -.3px; margin-bottom: 4px; }
+.page-header .sub { font-size: 12px; color: #94a3b8; }
+.page-header .meta { font-size: 11px; color: #64748b; margin-top: 6px; }
+
+.main { max-width: 1200px; margin: 0 auto; padding: 24px 24px 60px; }
+
+/* ── Summary bar ─────────────────────────────────────────────────────────── */
+.summary-bar {
+  display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 28px;
+}
+.summary-card {
+  flex: 1; min-width: 140px; border-radius: 10px;
+  padding: 16px 20px; text-align: center;
+}
+.summary-card .num  { font-size: 28px; font-weight: 700; line-height: 1; }
+.summary-card .lbl  { font-size: 11px; color: #94a3b8; margin-top: 4px; text-transform: uppercase; letter-spacing: .5px; }
+.summary-card.purple { background: #1e1b4b; border: 1px solid #4338ca; }
+.summary-card.green  { background: #052e16; border: 1px solid #16a34a; }
+.summary-card.amber  { background: #1c1200; border: 1px solid #d97706; }
+.summary-card.blue   { background: #0c1a2e; border: 1px solid #2563eb; }
+.summary-card.gray   { background: #1e293b; border: 1px solid #475569; }
+
+/* ── Chart section ───────────────────────────────────────────────────────── */
+.chart-section {
+  background: #1e293b; border: 1px solid #334155; border-radius: 10px;
+  padding: 20px 24px; margin-bottom: 28px;
+}
+.chart-section h2 { font-size: 14px; font-weight: 600; color: #94a3b8;
+                    text-transform: uppercase; letter-spacing: .5px; margin-bottom: 16px; }
+.chart-tabs { display: flex; gap: 8px; margin-bottom: 16px; }
+.chart-tab {
+  padding: 5px 14px; border-radius: 6px; border: 1px solid #334155;
+  background: #0f1117; color: #94a3b8; cursor: pointer; font-size: 12px;
+}
+.chart-tab.active { background: #4338ca; border-color: #6366f1; color: #fff; }
+.chart-wrap { position: relative; height: 220px; }
+canvas { width: 100% !important; height: 100% !important; }
+.chart-legend { display: flex; gap: 20px; margin-top: 12px; flex-wrap: wrap; }
+.legend-item { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #94a3b8; }
+.legend-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+
+/* ── Project sections ────────────────────────────────────────────────────── */
+.proj-section {
+  background: #1e293b; border: 1px solid #334155; border-radius: 10px;
+  margin-bottom: 16px; overflow: hidden;
+}
+.proj-head {
+  display: flex; align-items: center; gap: 12px; padding: 14px 20px;
+  cursor: pointer; user-select: none;
+}
+.proj-head:hover { background: #263245; }
+.proj-arrow { font-size: 10px; color: #64748b; transition: transform .2s; flex-shrink: 0; }
+.proj-section.open .proj-arrow { transform: rotate(90deg); }
+.proj-num  { font-size: 11px; font-weight: 600; color: #818cf8;
+             background: #1e1b4b; border: 1px solid #4338ca;
+             padding: 2px 8px; border-radius: 4px; flex-shrink: 0; }
+.proj-label { font-size: 15px; font-weight: 600; color: #e2e8f0; flex: 1; min-width: 0; }
+.proj-summary { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+.proj-counts { font-size: 11px; color: #64748b; white-space: nowrap; }
+
+.proj-body { display: none; border-top: 1px solid #334155; padding: 0 20px 16px; }
+.proj-section.open .proj-body { display: block; }
+
+/* ── Initiative table ────────────────────────────────────────────────────── */
+.init-table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+.init-table th {
+  text-align: left; font-size: 11px; color: #64748b; text-transform: uppercase;
+  letter-spacing: .5px; padding: 6px 10px; border-bottom: 1px solid #334155;
+}
+.init-table td { padding: 8px 10px; border-bottom: 1px solid #1e293b; vertical-align: middle; }
+.init-row:last-child td { border-bottom: none; }
+.init-row:hover td { background: #263245; }
+.init-link { color: #e2e8f0; font-size: 13px; }
+.init-link:hover { color: #818cf8; text-decoration: none; }
+
+/* ── Adoption bar ────────────────────────────────────────────────────────── */
+.adopt-bar-wrap {
+  height: 8px; background: #334155; border-radius: 4px;
+  overflow: hidden; width: 100%; min-width: 80px;
+}
+.adopt-bar { height: 100%; border-radius: 4px; transition: width .4s ease; }
+.proj-bar { min-width: 120px; height: 6px; }
+
+.adopt-cell  { width: 160px; }
+.pct-cell    { width: 48px; font-size: 13px; font-weight: 700; text-align: right; padding-right: 6px; }
+.count-cell  { width: 80px; font-size: 12px; color: #e2e8f0; }
+.count-cell .dim { color: #64748b; }
+.badge-cell  { width: 200px; }
+.adopt-pct   { font-size: 13px; font-weight: 700; white-space: nowrap; }
+
+/* ── Badges ──────────────────────────────────────────────────────────────── */
+.badge { display: inline-block; font-size: 11px; font-weight: 600;
+         padding: 2px 7px; border-radius: 4px; margin-right: 3px; }
+.badge-done { background: #052e16; color: #4ade80; border: 1px solid #16a34a; }
+.badge-wip  { background: #1c1200; color: #fbbf24; border: 1px solid #d97706; }
+.badge-todo { background: #0c1a2e; color: #93c5fd; border: 1px solid #2563eb; }
+
+/* ── Footer ──────────────────────────────────────────────────────────────── */
+.footer { text-align: center; font-size: 11px; color: #475569;
+          padding: 20px; border-top: 1px solid #1e293b; }
+</style>
+</head>
+<body>
+
+<div class="page-header">
+  <h1>Last Mile — FlowForge Adoption</h1>
+  <div class="sub">FlowForge spec-driven development adoption across Last Mile initiatives · Projects 15803 · 15820 · 15832</div>
+  <div class="meta">Last data pull: <!-- SLOT:last_pull --></div>
+</div>
+
+<div class="main">
+
+  <!-- Summary bar -->
+  <div class="summary-bar">
+    <!-- SLOT:summary_cards -->
+  </div>
+
+  <!-- Adoption trend charts -->
+  <div class="chart-section">
+    <h2>FlowForge Adoption Trend</h2>
+    <div class="chart-tabs">
+      <button class="chart-tab active" onclick="switchChart('pct',this)">Adoption % per Month</button>
+      <button class="chart-tab" onclick="switchChart('stacked',this)">FF vs Plain Tickets per Month</button>
+    </div>
+    <div class="chart-wrap">
+      <canvas id="chartCanvas"></canvas>
+    </div>
+    <div class="chart-legend" id="chartLegend"></div>
+  </div>
+
+  <!-- Project sections -->
+  <!-- SLOT:sections -->
+
+</div>
+
+<div class="footer">
+  FlowForge Adoption Dashboard · Last Mile (15803 · 15820 · 15832) · auto-refreshed daily 09:00 UTC
+</div>
+
+<!-- Chart data injected by generator -->
+<script>
+<!-- SLOT:chart_data -->
+</script>
+
+<script>
+// ── Minimal canvas chart renderer ─────────────────────────────────────────
+let currentMode = 'pct';
+
+function switchChart(mode, btn) {
+  currentMode = mode;
+  document.querySelectorAll('.chart-tab').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  drawChart();
+}
+
+function monthLabel(ym) {
+  const [y, m] = ym.split('-');
+  const names = ['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  return names[+m] + ' ' + y.slice(2);
+}
+
+function drawChart() {
+  const canvas = document.getElementById('chartCanvas');
+  const ctx = canvas.getContext('2d');
+  const W = canvas.offsetWidth;
+  const H = canvas.offsetHeight;
+  canvas.width = W * devicePixelRatio;
+  canvas.height = H * devicePixelRatio;
+  ctx.scale(devicePixelRatio, devicePixelRatio);
+  ctx.clearRect(0, 0, W, H);
+
+  const months = window.CHART_DATA.months;
+  const projs  = Object.keys(window.CHART_DATA).filter(k => k !== 'months');
+  if (!months.length) return;
+
+  const pad = { top: 16, right: 20, bottom: 36, left: 40 };
+  const cW = W - pad.left - pad.right;
+  const cH = H - pad.top - pad.bottom;
+
+  // Grid
+  ctx.strokeStyle = '#334155';
+  ctx.lineWidth = 1;
+  const gridLines = currentMode === 'pct' ? [0,25,50,75,100] : null;
+
+  if (currentMode === 'pct') {
+    gridLines.forEach(v => {
+      const y = pad.top + cH - (v / 100) * cH;
+      ctx.beginPath(); ctx.moveTo(pad.left, y); ctx.lineTo(pad.left + cW, y);
+      ctx.stroke();
+      ctx.fillStyle = '#475569'; ctx.font = '10px system-ui';
+      ctx.textAlign = 'right';
+      ctx.fillText(v + '%', pad.left - 4, y + 3);
+    });
+  } else {
+    // stacked — find max total across all projects/months
+    let maxVal = 0;
+    projs.forEach(p => {
+      months.forEach(m => {
+        maxVal = Math.max(maxVal, (window.CHART_DATA[p].total || [])[months.indexOf(m)] || 0);
+      });
+    });
+    maxVal = Math.ceil(maxVal / 5) * 5 || 10;
+    [0, Math.round(maxVal*0.25), Math.round(maxVal*0.5), Math.round(maxVal*0.75), maxVal].forEach(v => {
+      const y = pad.top + cH - (v / maxVal) * cH;
+      ctx.beginPath(); ctx.moveTo(pad.left, y); ctx.lineTo(pad.left + cW, y);
+      ctx.stroke();
+      ctx.fillStyle = '#475569'; ctx.font = '10px system-ui';
+      ctx.textAlign = 'right';
+      ctx.fillText(v, pad.left - 4, y + 3);
+    });
+  }
+
+  const xStep = cW / Math.max(months.length - 1, 1);
+
+  // Month labels (every 2nd)
+  ctx.fillStyle = '#64748b'; ctx.font = '10px system-ui'; ctx.textAlign = 'center';
+  months.forEach((m, i) => {
+    if (i % 2 === 0) {
+      const x = pad.left + i * xStep;
+      ctx.fillText(monthLabel(m), x, H - pad.bottom + 14);
+    }
+  });
+
+  if (currentMode === 'pct') {
+    // Line chart: % adoption per project
+    projs.forEach(p => {
+      const d = window.CHART_DATA[p];
+      const vals = d.pct;
+      ctx.beginPath();
+      ctx.strokeStyle = d.color;
+      ctx.lineWidth = 2.5;
+      ctx.lineJoin = 'round';
+      vals.forEach((v, i) => {
+        const x = pad.left + i * xStep;
+        const y = pad.top + cH - (v / 100) * cH;
+        i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+      });
+      ctx.stroke();
+      // Dots
+      vals.forEach((v, i) => {
+        const x = pad.left + i * xStep;
+        const y = pad.top + cH - (v / 100) * cH;
+        ctx.beginPath();
+        ctx.arc(x, y, 3.5, 0, Math.PI*2);
+        ctx.fillStyle = d.color;
+        ctx.fill();
+      });
+    });
+  } else {
+    // Stacked bar: ff (solid) + plain (dimmed)
+    let maxVal = 0;
+    projs.forEach(p => {
+      months.forEach((m, i) => { maxVal = Math.max(maxVal, window.CHART_DATA[p].total[i] || 0); });
+    });
+    maxVal = Math.ceil(maxVal / 5) * 5 || 10;
+
+    const barGroupW = xStep * 0.8;
+    const barW = barGroupW / projs.length;
+
+    months.forEach((m, mi) => {
+      const cx = pad.left + mi * xStep;
+      projs.forEach((p, pi) => {
+        const d = window.CHART_DATA[p];
+        const total = d.total[mi] || 0;
+        const ff    = d.ff[mi] || 0;
+        const plain = total - ff;
+        const x = cx - barGroupW/2 + pi * barW;
+
+        // plain (dimmed)
+        if (plain > 0) {
+          const h = (plain / maxVal) * cH;
+          ctx.fillStyle = d.color + '44';
+          ctx.fillRect(x, pad.top + cH - (total / maxVal) * cH, barW - 2, (plain / maxVal) * cH);
+        }
+        // ff (solid)
+        if (ff > 0) {
+          const ffH = (ff / maxVal) * cH;
+          ctx.fillStyle = d.color;
+          ctx.fillRect(x, pad.top + cH - ffH, barW - 2, ffH);
+        }
+      });
+    });
+  }
+
+  // Legend
+  const legend = document.getElementById('chartLegend');
+  legend.innerHTML = projs.map(p => {
+    const d = window.CHART_DATA[p];
+    return `<div class="legend-item"><div class="legend-dot" style="background:${d.color}"></div>${d.label}</div>`;
+  }).join('');
+}
+
+// Open all sections by default
+document.querySelectorAll('.proj-section').forEach(s => s.classList.add('open'));
+
+// Draw on load + resize
+window.addEventListener('load', drawChart);
+window.addEventListener('resize', drawChart);
+</script>
+
+</body>
+</html>
