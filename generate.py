@@ -2,7 +2,7 @@
 """
 Last Mile Adoption Dashboard Generator
 Fetches ALL CIL tickets (FlowForge-labelled and plain) for Last Mile epics
-and computes FlowForge adoption rates per initiative and per month.
+in a single pass, capturing status, AI cost, and FlowForge label per ticket.
 
 Usage:
     python3 generate.py
@@ -34,19 +34,19 @@ except ImportError:
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
-JIRA_URL   = os.environ.get("JIRA_URL",   "https://sisu-agile.atlassian.net")
-JIRA_EMAIL = os.environ.get("JIRA_EMAIL", "")
-JIRA_TOKEN = os.environ.get("JIRA_API_TOKEN", "")
+JIRA_URL      = os.environ.get("JIRA_URL",   "https://sisu-agile.atlassian.net")
+JIRA_EMAIL    = os.environ.get("JIRA_EMAIL", "")
+JIRA_TOKEN    = os.environ.get("JIRA_API_TOKEN", "")
+AI_COST_FIELD = "customfield_13682"
 
 DASHBOARD_FILE = os.path.join(os.path.dirname(__file__), "index.html")
 TEMPLATE_FILE  = os.path.join(os.path.dirname(__file__), "template.html")
 
-# Adoption is measured from this date forward — before this date FlowForge was not yet in use
+# Adoption % is measured from this date forward
 FF_ADOPTION_START = "2026-06-01"
 
 # ── Last Mile initiative registry ─────────────────────────────────────────────
 # (slug, prod_key, project_number, display_title, {epic_key: epic_title})
-# project_number groups initiatives into programme sections.
 
 INITIATIVES = [
     # ── 15803 · Fusion B2C US ────────────────────────────────────────────────
@@ -145,7 +145,7 @@ INITIATIVES = [
     }),
 ]
 
-# Build epic → initiative lookup
+# Build lookup tables
 EPIC_TO_INIT = {}
 INIT_META    = {}   # slug → (prod_key, project_number, title, epics_dict)
 for slug, prod_key, proj, title, epics in INITIATIVES:
@@ -154,7 +154,6 @@ for slug, prod_key, proj, title, epics in INITIATIVES:
     for e in epics:
         EPIC_TO_INIT[e] = slug
 
-# All epic keys we need to query (across all initiatives)
 ALL_EPIC_KEYS = set(EPIC_TO_INIT.keys())
 
 PROJECT_LABELS = {
@@ -190,31 +189,37 @@ def jira_search(jql, fields):
     return all_issues
 
 
-def fetch_tickets_for_epics(epic_keys):
-    """Fetch ALL CIL tickets whose parent is one of the given epic keys.
-    Returns list of dicts with key, summary, parent, created, is_flowforge, status, cat."""
-    # Jira IN clause — batch to avoid URL limits
-    keys_list = list(epic_keys)
+def fetch_all_tickets(epic_keys):
+    """Single fetch of ALL CIL tickets under Last Mile epics.
+    Captures: key, summary, parent, created, status, cat, is_flowforge, ai_cost."""
+    keys_list  = list(epic_keys)
     all_tickets = []
-    batch_size = 50
+    batch_size  = 50
+    fields      = f"summary,status,parent,created,labels,{AI_COST_FIELD}"
+
     for i in range(0, len(keys_list), batch_size):
-        batch = keys_list[i:i+batch_size]
+        batch    = keys_list[i:i + batch_size]
         keys_str = ",".join(batch)
-        jql = f'project = CIL AND "Epic Link" in ({keys_str}) ORDER BY created ASC'
-        fields = "summary,status,parent,created,labels,issuetype"
+        jql      = f'project = CIL AND "Epic Link" in ({keys_str}) ORDER BY created ASC'
         try:
             raw = jira_search(jql, fields)
         except Exception as e:
-            print(f"  Warning: batch {i//batch_size} failed: {e}", file=sys.stderr)
+            print(f"  Warning: batch {i // batch_size} failed: {e}", file=sys.stderr)
             raw = []
+
         for issue in raw:
-            f = issue["fields"]
-            labels   = [l for l in (f.get("labels") or [])]
+            f        = issue["fields"]
+            labels   = f.get("labels") or []
             parent   = (f.get("parent") or {}).get("key", "")
-            status   = (f.get("status") or {})
+            status   = f.get("status") or {}
             stat_name = status.get("name", "")
             stat_cat  = status.get("statusCategory", {}).get("name", "To Do")
             created  = (f.get("created") or "")[:10]
+            try:
+                ai_cost = float(f.get(AI_COST_FIELD) or 0)
+            except (TypeError, ValueError):
+                ai_cost = 0.0
+
             all_tickets.append({
                 "key":          issue["key"],
                 "summary":      f.get("summary", ""),
@@ -223,89 +228,53 @@ def fetch_tickets_for_epics(epic_keys):
                 "status":       stat_name,
                 "cat":          stat_cat,
                 "is_flowforge": "FlowForge" in labels,
+                "ai_cost":      ai_cost,
             })
-    return all_tickets
 
-
-def fetch_flowforge_tickets_for_epics(epic_keys):
-    """Fetch only FlowForge-labelled CIL tickets for the given epic keys."""
-    keys_list = list(epic_keys)
-    all_tickets = []
-    batch_size = 50
-    for i in range(0, len(keys_list), batch_size):
-        batch = keys_list[i:i+batch_size]
-        keys_str = ",".join(batch)
-        jql = f'project = CIL AND labels = "FlowForge" AND "Epic Link" in ({keys_str}) ORDER BY created ASC'
-        fields = "summary,status,parent,created,labels"
-        try:
-            raw = jira_search(jql, fields)
-        except Exception as e:
-            print(f"  Warning: FF batch {i//batch_size} failed: {e}", file=sys.stderr)
-            raw = []
-        for issue in raw:
-            f = issue["fields"]
-            parent   = (f.get("parent") or {}).get("key", "")
-            status   = (f.get("status") or {})
-            stat_name = status.get("name", "")
-            stat_cat  = status.get("statusCategory", {}).get("name", "To Do")
-            created  = (f.get("created") or "")[:10]
-            all_tickets.append({
-                "key":          issue["key"],
-                "summary":      f.get("summary", ""),
-                "parent":       parent,
-                "created":      created,
-                "status":       stat_name,
-                "cat":          stat_cat,
-                "is_flowforge": True,
-            })
     return all_tickets
 
 
 # ── Data computation ──────────────────────────────────────────────────────────
 
-def compute_initiative_stats(all_tickets, ff_tickets):
-    """Return per-initiative stats dict."""
-    # Index by initiative slug
-    init_all = defaultdict(list)
-    init_ff  = defaultdict(list)
-
+def compute_stats(all_tickets):
+    """Compute per-initiative stats from the single ticket list."""
+    by_slug = defaultdict(list)
     for t in all_tickets:
         slug = EPIC_TO_INIT.get(t["parent"])
         if slug:
-            init_all[slug].append(t)
-
-    for t in ff_tickets:
-        slug = EPIC_TO_INIT.get(t["parent"])
-        if slug:
-            init_ff[slug].append(t)
+            by_slug[slug].append(t)
 
     stats = {}
     for slug, (prod_key, proj, title, epics) in INIT_META.items():
-        total = len(init_all[slug])
-        ff    = len(init_ff[slug])
-        # Adoption % computed only from FF_ADOPTION_START forward
-        total_since = sum(1 for t in init_all[slug] if t["created"] >= FF_ADOPTION_START)
-        ff_since    = sum(1 for t in init_ff[slug]  if t["created"] >= FF_ADOPTION_START)
+        tickets = by_slug[slug]
+        ff      = [t for t in tickets if t["is_flowforge"]]
+
+        total_since = sum(1 for t in tickets if t["created"] >= FF_ADOPTION_START)
+        ff_since    = sum(1 for t in ff      if t["created"] >= FF_ADOPTION_START)
         pct_since   = round(ff_since / total_since * 100) if total_since > 0 else 0
-        done_ff   = sum(1 for t in init_ff[slug] if t["cat"] == "Done")
-        wip_ff    = sum(1 for t in init_ff[slug] if t["cat"] == "In Progress")
-        todo_ff   = sum(1 for t in init_ff[slug] if t["cat"] == "To Do")
+
         stats[slug] = {
-            "slug": slug, "prod_key": prod_key, "proj": proj, "title": title,
-            "total": total, "ff": ff, "non_ff": total - ff,
-            "total_since": total_since, "ff_since": ff_since, "pct_since": pct_since,
-            "done_ff": done_ff, "wip_ff": wip_ff, "todo_ff": todo_ff,
-            "tickets": init_all[slug],
-            "ff_tickets": init_ff[slug],
+            "slug":        slug,
+            "prod_key":    prod_key,
+            "proj":        proj,
+            "title":       title,
+            "total":       len(tickets),
+            "ff":          len(ff),
+            "total_since": total_since,
+            "ff_since":    ff_since,
+            "pct_since":   pct_since,
+            "done_ff":     sum(1 for t in ff if t["cat"] == "Done"),
+            "wip_ff":      sum(1 for t in ff if t["cat"] == "In Progress"),
+            "todo_ff":     sum(1 for t in ff if t["cat"] == "To Do"),
+            "ai_cost":     sum(t["ai_cost"] for t in tickets),
+            "tickets":     tickets,
         }
     return stats
 
 
-def compute_monthly_adoption(all_tickets, ff_tickets, epic_to_slug=None):
-    """Return per-project-number monthly series for adoption chart.
-    Result: {proj: {ym: {total, ff}}}"""
-    by_proj_month_total = defaultdict(lambda: defaultdict(int))
-    by_proj_month_ff    = defaultdict(lambda: defaultdict(int))
+def compute_monthly_adoption(all_tickets):
+    """Per-project-number monthly series: {proj: {ym: {total, ff, cost}}}"""
+    by_proj = defaultdict(lambda: defaultdict(lambda: {"total": 0, "ff": 0, "cost": 0.0}))
 
     for t in all_tickets:
         slug = EPIC_TO_INIT.get(t["parent"])
@@ -313,32 +282,13 @@ def compute_monthly_adoption(all_tickets, ff_tickets, epic_to_slug=None):
             continue
         proj = INIT_META[slug][1]
         ym   = t["created"][:7]
-        by_proj_month_total[proj][ym] += 1
+        by_proj[proj][ym]["total"] += 1
+        if t["is_flowforge"]:
+            by_proj[proj][ym]["ff"] += 1
+        by_proj[proj][ym]["cost"] += t["ai_cost"]
 
-    for t in ff_tickets:
-        slug = EPIC_TO_INIT.get(t["parent"])
-        if not slug:
-            continue
-        proj = INIT_META[slug][1]
-        ym   = t["created"][:7]
-        by_proj_month_ff[proj][ym] += 1
-
-    # Merge into unified month list
-    all_months = sorted(set(
-        ym for d in list(by_proj_month_total.values()) + list(by_proj_month_ff.values())
-        for ym in d
-    ))
-
-    result = {}
-    for proj in set(list(by_proj_month_total.keys()) + list(by_proj_month_ff.keys())):
-        result[proj] = {
-            ym: {
-                "total": by_proj_month_total[proj].get(ym, 0),
-                "ff":    by_proj_month_ff[proj].get(ym, 0),
-            }
-            for ym in all_months
-        }
-    return result, all_months
+    all_months = sorted({ym for d in by_proj.values() for ym in d})
+    return by_proj, all_months
 
 
 # ── HTML builders ─────────────────────────────────────────────────────────────
@@ -351,34 +301,28 @@ def pct_color(pct):
     return "#dc2626"
 
 
-def adoption_bar(ff, total):
-    pct = round(ff / total * 100) if total > 0 else 0
-    color = pct_color(pct)
-    non_ff = total - ff
-    return (
-        f'<div class="adopt-bar-wrap">'
-        f'<div class="adopt-bar" style="width:{pct}%;background:{color}"></div>'
-        f'</div>'
-        f'<span class="adopt-pct" style="color:{color}">{pct}%</span>'
-        f'<span class="adopt-detail">{ff} FF / {non_ff} plain / {total} total</span>'
-    )
-
-
-def _ticket_status_badge(cat, status):
+def _status_badge(cat, status):
     if cat == "Done":
-        return f'<span class="t-badge t-done">Done</span>'
+        return '<span class="t-badge t-done">Done</span>'
     if cat == "In Progress":
         return f'<span class="t-badge t-wip">{html_lib.escape(status)}</span>'
     return f'<span class="t-badge t-todo">{html_lib.escape(status)}</span>'
 
 
+def _cost_str(cost):
+    if cost >= 1:
+        return f"${cost:.2f}"
+    if cost > 0:
+        return f"${cost:.3f}"
+    return "—"
+
+
 def build_detail_panel(s):
-    """Build the hidden expandable panel: epics → tickets."""
+    """Expandable panel: epics → tickets with key, summary, FF label, status, AI cost."""
     prod_key = s["prod_key"]
     slug     = s["slug"]
     _, proj, title, epics = INIT_META[slug]
 
-    # Group all tickets by their parent epic key
     by_epic = defaultdict(list)
     for t in s["tickets"]:
         by_epic[t["parent"]].append(t)
@@ -388,42 +332,48 @@ def build_detail_panel(s):
         tickets = by_epic.get(epic_key, [])
         if not tickets:
             continue
-        ff_count = sum(1 for t in tickets if t["is_flowforge"])
-        ff_badge = f'<span class="epic-ff-badge">{ff_count} FF</span>' if ff_count else ""
-        key_html = (
+        ff_count   = sum(1 for t in tickets if t["is_flowforge"])
+        epic_cost  = sum(t["ai_cost"] for t in tickets)
+        ff_badge   = f'<span class="epic-ff-badge">{ff_count} FF</span>' if ff_count else ""
+        cost_badge = f'<span class="epic-cost-badge">✦ {_cost_str(epic_cost)}</span>' if epic_cost > 0 else ""
+        key_html   = (
             f'<a class="epic-key-link" href="{JIRA_URL}/browse/{epic_key}" target="_blank">{epic_key}</a>'
             if epic_key else ""
         )
         rows = ""
         for t in sorted(tickets, key=lambda x: x["key"]):
             pill = '<span class="ff-pill">FlowForge</span>' if t["is_flowforge"] else '<span class="plain-pill">plain</span>'
-            stat = _ticket_status_badge(t["cat"], t["status"])
+            stat = _status_badge(t["cat"], t["status"])
+            cost = f'<span class="ticket-cost">{_cost_str(t["ai_cost"])}</span>'
             rows += (
                 f'<div class="ticket-item">'
                 f'<a class="ticket-key" href="{JIRA_URL}/browse/{t["key"]}" target="_blank">{t["key"]}</a>'
                 f'<span class="ticket-summary">{html_lib.escape(t["summary"])}</span>'
-                f'{pill}{stat}'
+                f'{pill}{stat}{cost}'
                 f'</div>\n'
             )
         parts.append(
             f'<div class="epic-group">'
-            f'<div class="epic-head">{key_html}<span class="epic-title">{html_lib.escape(epic_title)}</span>{ff_badge}</div>'
+            f'<div class="epic-head">{key_html}'
+            f'<span class="epic-title">{html_lib.escape(epic_title)}</span>'
+            f'{ff_badge}{cost_badge}</div>'
             f'<div class="ticket-list">{rows}</div>'
             f'</div>'
         )
 
-    # Tickets parented directly to the initiative prod_key (no sub-epic)
+    # Tickets parented directly to the initiative prod_key
     direct = [t for t in by_epic.get(prod_key, []) if prod_key not in epics]
     if direct:
         rows = ""
         for t in sorted(direct, key=lambda x: x["key"]):
             pill = '<span class="ff-pill">FlowForge</span>' if t["is_flowforge"] else '<span class="plain-pill">plain</span>'
-            stat = _ticket_status_badge(t["cat"], t["status"])
+            stat = _status_badge(t["cat"], t["status"])
+            cost = f'<span class="ticket-cost">{_cost_str(t["ai_cost"])}</span>'
             rows += (
                 f'<div class="ticket-item">'
                 f'<a class="ticket-key" href="{JIRA_URL}/browse/{t["key"]}" target="_blank">{t["key"]}</a>'
                 f'<span class="ticket-summary">{html_lib.escape(t["summary"])}</span>'
-                f'{pill}{stat}'
+                f'{pill}{stat}{cost}'
                 f'</div>\n'
             )
         parts.append(
@@ -442,13 +392,14 @@ def build_initiative_row(s):
     color = pct_color(pct)
     ff    = s["ff_since"]
     total = s["total_since"]
+    cost  = s["ai_cost"]
 
     done_html = f'<span class="badge badge-done">{s["done_ff"]} done</span>' if s["done_ff"] else ""
     wip_html  = f'<span class="badge badge-wip">{s["wip_ff"]} active</span>'  if s["wip_ff"]  else ""
     todo_html = f'<span class="badge badge-todo">{s["todo_ff"]} to do</span>' if s["todo_ff"] else ""
+    cost_html = f'<span class="init-cost">✦ {_cost_str(cost)}</span>' if cost > 0 else ""
 
     detail = build_detail_panel(s)
-    colspan = 5
 
     return (
         f'<tr class="init-row">'
@@ -457,13 +408,14 @@ def build_initiative_row(s):
         f'<a href="{JIRA_URL}/browse/{s["prod_key"]}" target="_blank" class="init-link">{html_lib.escape(s["title"])}</a>'
         f'</td>'
         f'<td class="adopt-cell">'
-        f'  <div class="adopt-bar-wrap"><div class="adopt-bar" style="width:{pct}%;background:{color}"></div></div>'
+        f'<div class="adopt-bar-wrap"><div class="adopt-bar" style="width:{pct}%;background:{color}"></div></div>'
         f'</td>'
         f'<td class="pct-cell" style="color:{color}">{pct}%</td>'
         f'<td class="count-cell">{ff} <span class="dim">/ {total}</span></td>'
         f'<td class="badge-cell">{wip_html}{done_html}{todo_html}</td>'
+        f'<td class="cost-cell">{cost_html}</td>'
         f'</tr>'
-        f'<tr class="detail-row"><td colspan="{colspan}">{detail}</td></tr>'
+        f'<tr class="detail-row"><td colspan="6">{detail}</td></tr>'
     )
 
 
@@ -471,10 +423,14 @@ def build_project_section(proj, label, init_slugs, stats):
     proj_total_since = sum(stats[s]["total_since"] for s in init_slugs if s in stats)
     proj_ff_since    = sum(stats[s]["ff_since"]    for s in init_slugs if s in stats)
     proj_pct         = round(proj_ff_since / proj_total_since * 100) if proj_total_since > 0 else 0
-    proj_total_all   = sum(stats[s]["total"] for s in init_slugs if s in stats)
+    proj_cost        = sum(stats[s]["ai_cost"] for s in init_slugs if s in stats)
     color            = pct_color(proj_pct)
 
-    rows = "\n".join(build_initiative_row(stats[s]) for s in init_slugs if s in stats and stats[s]["total"] > 0)
+    rows = "\n".join(
+        build_initiative_row(stats[s])
+        for s in init_slugs if s in stats and stats[s]["total"] > 0
+    )
+    cost_html = f'<span class="proj-cost">✦ {_cost_str(proj_cost)}</span>' if proj_cost > 0 else ""
 
     return (
         f'<div class="proj-section" data-proj="{proj}">\n'
@@ -486,12 +442,15 @@ def build_project_section(proj, label, init_slugs, stats):
         f'<div class="adopt-bar-wrap proj-bar"><div class="adopt-bar" style="width:{proj_pct}%;background:{color}"></div></div>'
         f'<span class="adopt-pct" style="color:{color}">{proj_pct}% adoption</span>'
         f'<span class="proj-counts">{proj_ff_since} FF / {proj_total_since} tickets since Jun 2026</span>'
+        f'{cost_html}'
         f'</div>\n'
         f'  </div>\n'
         f'  <div class="proj-body">\n'
         f'    <table class="init-table">\n'
-        f'      <thead><tr><th>Initiative</th><th>FF Adoption</th><th>%</th>'
-        f'<th>FF / Total</th><th>Status</th></tr></thead>\n'
+        f'      <thead><tr>'
+        f'<th>Initiative</th><th>FF Adoption</th><th>%</th>'
+        f'<th>FF / Total</th><th>Status</th><th>AI Cost</th>'
+        f'</tr></thead>\n'
         f'      <tbody>\n{rows}\n      </tbody>\n'
         f'    </table>\n'
         f'  </div>\n'
@@ -500,38 +459,39 @@ def build_project_section(proj, label, init_slugs, stats):
 
 
 def build_summary_cards(stats, all_months):
-    total_all    = sum(s["total"]       for s in stats.values())
-    total_ff     = sum(s["ff"]          for s in stats.values())
-    total_since  = sum(s["total_since"] for s in stats.values())
-    ff_since     = sum(s["ff_since"]    for s in stats.values())
-    pct          = round(ff_since / total_since * 100) if total_since > 0 else 0
-    active       = sum(1 for s in stats.values() if s["total"] > 0)
-    color        = pct_color(pct)
+    total_all   = sum(s["total"]       for s in stats.values())
+    total_ff    = sum(s["ff"]          for s in stats.values())
+    total_since = sum(s["total_since"] for s in stats.values())
+    ff_since    = sum(s["ff_since"]    for s in stats.values())
+    pct         = round(ff_since / total_since * 100) if total_since > 0 else 0
+    total_cost  = sum(s["ai_cost"]     for s in stats.values())
+    active      = sum(1 for s in stats.values() if s["total"] > 0)
+    color       = pct_color(pct)
     return (
         f'<div class="summary-card purple"><div class="num">{total_all}</div><div class="lbl">Total CIL Tickets</div></div>\n'
         f'<div class="summary-card green"><div class="num">{total_ff}</div><div class="lbl">FlowForge Tickets</div></div>\n'
         f'<div class="summary-card amber"><div class="num" style="color:{color}">{pct}%</div><div class="lbl">FF Adoption (since Jun 2026)</div></div>\n'
         f'<div class="summary-card blue"><div class="num">{active}</div><div class="lbl">Active Initiatives</div></div>\n'
-        f'<div class="summary-card gray"><div class="num">{len(all_months)}</div><div class="lbl">Months of Data</div></div>'
+        f'<div class="summary-card gold"><div class="num">{_cost_str(total_cost)}</div><div class="lbl">Total AI Cost (FF tickets)</div></div>'
     )
 
 
 def build_chart_data(monthly, all_months):
-    """Emit a JS object used by the chart: window.CHART_DATA = {...}"""
     proj_colors = {"15803": "#6366f1", "15820": "#f59e0b", "15832": "#10b981"}
     lines = []
     for proj, color in proj_colors.items():
         if proj not in monthly:
             continue
-        ff_vals    = [monthly[proj].get(ym, {}).get("ff", 0)    for ym in all_months]
-        total_vals = [monthly[proj].get(ym, {}).get("total", 0) for ym in all_months]
+        ff_vals    = [monthly[proj].get(ym, {}).get("ff",    0)   for ym in all_months]
+        total_vals = [monthly[proj].get(ym, {}).get("total", 0)   for ym in all_months]
+        cost_vals  = [round(monthly[proj].get(ym, {}).get("cost", 0.0), 2) for ym in all_months]
         pct_vals   = [
             round(ff / t * 100) if t > 0 else 0
             for ff, t in zip(ff_vals, total_vals)
         ]
         lines.append(
             f'  "{proj}": {{"color":"{color}","label":"{PROJECT_LABELS[proj]}",'
-            f'"ff":{ff_vals},"total":{total_vals},"pct":{pct_vals}}}'
+            f'"ff":{ff_vals},"total":{total_vals},"pct":{pct_vals},"cost":{cost_vals}}}'
         )
     months_js = "[" + ",".join(f'"{m}"' for m in all_months) + "]"
     return f'window.CHART_DATA = {{\n  "months": {months_js},\n' + ",\n".join(lines) + "\n};\n"
@@ -546,15 +506,13 @@ def fill_template(stats, monthly, all_months):
     with open(TEMPLATE_FILE) as f:
         html = f.read()
 
-    # Group slugs by project number (preserve INITIATIVES order)
     proj_slugs = defaultdict(list)
     for slug, prod_key, proj, title, epics in INITIATIVES:
         proj_slugs[proj].append(slug)
 
     sections = ""
     for proj in ["15803", "15820", "15832"]:
-        label = PROJECT_LABELS[proj]
-        sections += build_project_section(proj, label, proj_slugs[proj], stats)
+        sections += build_project_section(proj, PROJECT_LABELS[proj], proj_slugs[proj], stats)
 
     today_str = date.today().strftime("%d %b %Y")
 
@@ -585,31 +543,28 @@ def main():
         sys.exit("Set JIRA_EMAIL and JIRA_API_TOKEN environment variables")
 
     print("Fetching all CIL tickets for Last Mile epics…")
-    all_tickets = fetch_tickets_for_epics(ALL_EPIC_KEYS)
+    all_tickets = fetch_all_tickets(ALL_EPIC_KEYS)
     all_tickets = [t for t in all_tickets if t["status"] != "Closed"]
-    print(f"  {len(all_tickets)} total CIL tickets")
+    print(f"  {len(all_tickets)} tickets ({sum(t['is_flowforge'] for t in all_tickets)} FlowForge)")
 
-    print("Fetching FlowForge-labelled tickets…")
-    ff_tickets = fetch_flowforge_tickets_for_epics(ALL_EPIC_KEYS)
-    ff_tickets = [t for t in ff_tickets if t["status"] != "Closed"]
-    print(f"  {len(ff_tickets)} FlowForge tickets")
-
-    stats   = compute_initiative_stats(all_tickets, ff_tickets)
-    monthly, all_months = compute_monthly_adoption(all_tickets, ff_tickets)
+    stats          = compute_stats(all_tickets)
+    monthly, months = compute_monthly_adoption(all_tickets)
 
     if args.dry_run:
         total_all = sum(s["total"] for s in stats.values())
-        total_ff  = sum(s["ff"]    for s in stats.values())
-        pct = round(total_ff / total_all * 100) if total_all > 0 else 0
-        print(f"  Overall adoption: {pct}% ({total_ff} FF / {total_all} total)")
-        for slug, s in sorted(stats.items(), key=lambda x: -x[1]["pct"]):
+        ff_since  = sum(s["ff_since"] for s in stats.values())
+        tot_since = sum(s["total_since"] for s in stats.values())
+        pct       = round(ff_since / tot_since * 100) if tot_since else 0
+        total_cost = sum(s["ai_cost"] for s in stats.values())
+        print(f"  Adoption since Jun 2026: {pct}% ({ff_since}/{tot_since})")
+        print(f"  Total AI cost: {_cost_str(total_cost)}")
+        for slug, s in sorted(stats.items(), key=lambda x: -x[1]["pct_since"]):
             if s["total"] > 0:
-                print(f"  {s['title'][:50]:<50} {s['pct']:3}%  ({s['ff']}/{s['total']})")
+                print(f"  {s['title'][:50]:<50} {s['pct_since']:3}%  FF:{s['ff']}/{s['total']}  cost:{_cost_str(s['ai_cost'])}")
         return
 
     print("Filling template…")
-    new_html = fill_template(stats, monthly, all_months)
-
+    new_html = fill_template(stats, monthly, months)
     with open(DASHBOARD_FILE, "w") as f:
         f.write(new_html)
     print(f"  Written {DASHBOARD_FILE} ({len(new_html):,} chars)")

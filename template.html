@@ -40,6 +40,7 @@ a:hover { text-decoration: underline; }
 .summary-card.amber  { background: #1c1200; border: 1px solid #d97706; }
 .summary-card.blue   { background: #0c1a2e; border: 1px solid #2563eb; }
 .summary-card.gray   { background: #1e293b; border: 1px solid #475569; }
+.summary-card.gold   { background: #1a1200; border: 1px solid #ca8a04; }
 
 /* ── Chart section ───────────────────────────────────────────────────────── */
 .chart-section {
@@ -107,6 +108,9 @@ canvas { width: 100% !important; height: 100% !important; }
 .count-cell  { width: 80px; font-size: 12px; color: #e2e8f0; }
 .count-cell .dim { color: #64748b; }
 .badge-cell  { width: 200px; }
+.cost-cell   { width: 90px; font-size: 12px; text-align: right; }
+.init-cost   { color: #ca8a04; font-weight: 600; }
+.proj-cost   { font-size: 11px; color: #ca8a04; font-weight: 600; white-space: nowrap; }
 .adopt-pct   { font-size: 13px; font-weight: 700; white-space: nowrap; }
 
 /* ── Badges ──────────────────────────────────────────────────────────────── */
@@ -158,6 +162,10 @@ canvas { width: 100% !important; height: 100% !important; }
 .plain-pill { font-size: 10px; background: #1e293b; color: #64748b;
               border: 1px solid #334155; border-radius: 3px; padding: 1px 5px;
               flex-shrink: 0; }
+.ticket-cost { font-size: 10px; color: #ca8a04; flex-shrink: 0; min-width: 48px; text-align: right; }
+.epic-cost-badge { font-size: 10px; color: #ca8a04; background: #1a1200;
+                   border: 1px solid #ca8a04; border-radius: 3px;
+                   padding: 1px 5px; margin-left: 6px; flex-shrink: 0; }
 .t-badge { display: inline-block; font-size: 10px; font-weight: 600;
            padding: 1px 5px; border-radius: 3px; }
 .t-done  { background: #052e16; color: #4ade80; border: 1px solid #16a34a; }
